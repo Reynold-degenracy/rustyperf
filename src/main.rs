@@ -5,9 +5,9 @@ use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "My Application",
-    author = "Author's name",
-    version = "v1.0.0",
+    name = "RustyPerf",
+    author = "Shinonome Rei",
+    version = "v1.0.1",
     about = "Application short description."
 )]
 struct Config {
@@ -24,7 +24,7 @@ struct Config {
     #[arg(short='s', long="server", default_value_t = true)]
     server: bool,
 
-    #[arg(short='a', long="address", default_value_t = String::from(""))]
+    #[arg(short='a', long="address", default_value_t = String::from("127.0.0.1"))]
     address: String,
 
 }
@@ -69,8 +69,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     else if arg.server {
 
         // 1. 创建一个 TCP 监听器并绑定到地址
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", arg.port)).await?;
-        println!("服务器正在监听 127.0.0.1:{}", arg.port);
+        let listener = TcpListener::bind(format!("{}:{}", arg.address, arg.port)).await?;
+        println!("服务器正在监听 {}:{}", arg.address, arg.port);
         
         loop {
             // 2. 接受新的连接
