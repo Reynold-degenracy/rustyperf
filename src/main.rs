@@ -7,7 +7,7 @@ use clap::Parser;
 #[command(
     name = "RustyPerf",
     author = "Shinonome Rei",
-    version = "v1.0.1",
+    version = "v1.0.2",
     about = "Application short description."
 )]
 struct Config {
@@ -38,21 +38,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         use tokio::net::TcpStream;
         use tokio::io::AsyncWriteExt;
-        use tokio::time::{self, Duration};
+        use tokio::time::{Instant, Duration};
 
         // 1. 连接到服务器
         let mut stream = TcpStream::connect(format!("{}:{}", arg.address, arg.port)).await?;
         println!("已连接到服务器");
 
-        let data = [0u8; 1024 * 64]; // 64KB 的数据块
+        let data = [0u8; 1024 * 64]; // 64KiB 的数据块
         let test_duration: Duration = Duration::from_secs(arg.time as u64);
-        let start_time: time::Instant = time::Instant::now();
-        let mut total_bytes_sent: usize = 0;
+        let start_time: Instant = Instant::now();
+        let mut total_bytes_sent: u64 = 0;
+
+        //添加实时报告功能
+        let mut last_report_time = Instant::now();
+        let mut bytes_since_last_report: u64 = 0;
+        println!("开始{}秒测试...", arg.time);
 
         // 2. 在指定时间内持续发送数据
-        while time::Instant::now() - start_time < test_duration {
+        while Instant::now() - start_time < test_duration {
             stream.write_all(&data).await?;
-            total_bytes_sent += data.len();
+            let bytes_sent = data.len() as u64;
+            total_bytes_sent += bytes_sent;
+            bytes_since_last_report += bytes_sent;
+            if last_report_time.elapsed() >= Duration::from_secs(1) {
+                let throughput_mbps = (bytes_since_last_report * 8) as f64 / 1_000_000.0;
+                println!("当前速度 {:.2} Mbps", throughput_mbps);
+
+                // Reset for the next interval
+                bytes_since_last_report = 0;
+                last_report_time = Instant::now();
+            }
         }
 
         // 3. 计算并打印结果
