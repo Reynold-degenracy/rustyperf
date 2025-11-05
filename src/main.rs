@@ -39,6 +39,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if arg.client {
         // 1. 连接到服务器
         let stream = TcpStream::connect(format!("{}:{}", arg.address, arg.port)).await?;
+        if arg.reverse {
+            // let reverse_stream = TcpListener::bind("").await?;
+            
+        }
         println!("已连接到服务器");
         make_connection(stream, arg.time).await.unwrap();
     }
