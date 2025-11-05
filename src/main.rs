@@ -12,7 +12,7 @@ use clap::Parser;
 )]
 struct Config {
 
-    #[arg(short='p', long="port", default_value_t = 8080)]
+    #[arg(short='p', long="port", default_value_t = 2077)]
     port: u16,
 
     #[arg(short='t', long="time", default_value_t = 10)]
@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 1. 连接到服务器
         let stream = TcpStream::connect(format!("{}:{}", arg.address, arg.port)).await?;
         if arg.reverse {
-            // let reverse_stream = TcpListener::bind("").await?;
+            // let reverse_stream = TcpListener::bind(format!("0.0.0.0:{}", arg.port)).await?;
             
         }
         println!("已连接到服务器");
@@ -49,8 +49,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     else if arg.server {
         // 1. 创建一个 TCP 监听器并绑定到地址
-        let listener = TcpListener::bind(format!("{}:{}", arg.address, arg.port)).await?;
-        println!("服务器正在监听 {}:{}", arg.address, arg.port);
+        let listener = TcpListener::bind(format!("0.0.0.0:{}", arg.port)).await?;
+        println!("服务器正在监听{}端口", arg.port);
         loop {
             // 2. 接受新的连接
             let (socket, _) = listener.accept().await?; 
