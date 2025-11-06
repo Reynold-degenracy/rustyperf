@@ -42,12 +42,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if arg.reverse {
             // 反向模式：客户端接收，服务器发送
             println!("已连接到服务器 (反向模式)");
-            send_mode(&mut stream, true).await?;
+            send_mode(&mut stream, true, arg.time).await?;
             handle_connection(stream).await?;
         } else {
             // 正常模式：客户端发送，服务器接收
             println!("已连接到服务器 (正常模式)");
-            send_mode(&mut stream, false).await?;
+            send_mode(&mut stream, false, arg.time).await?;
             make_connection(stream, arg.time).await?;
         }
     }
@@ -63,11 +63,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 3. 为每个连接生成一个新任务，防止阻塞主循环
             tokio::spawn(async move {
                 match receive_mode(&mut socket).await {
-                    Ok(is_reverse) => {
+                    Ok((is_reverse, time)) => {
                         if is_reverse {
                             // 反向模式：服务器发送
                             println!("[{}] 反向模式，服务器开始发送数据", addr);
-                            if let Err(e) = make_connection(socket, arg.time).await {
+                            if let Err(e) = make_connection(socket, time).await {
                                 eprintln!("[{}] 发送错误: {}", addr, e);
                             }
                         } else {

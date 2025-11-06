@@ -2,16 +2,18 @@ use tokio::net::TcpStream;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::time::{Instant, Duration};
 
-pub async fn send_mode(stream: &mut TcpStream, is_reverse: bool) -> io::Result<()> {
+pub async fn send_mode(stream: &mut TcpStream, is_reverse: bool, time: u64) -> io::Result<()> {
     let mode_byte = if is_reverse { b'R' } else { b'N' };
     stream.write_u8(mode_byte).await?;
+    stream.write_u64(time).await?;
     stream.flush().await?;
     Ok(())
 }
 
-pub async fn receive_mode(stream: &mut TcpStream) -> io::Result<bool> {
+pub async fn receive_mode(stream: &mut TcpStream) -> io::Result<(bool, u64)> {
     let mode_byte = stream.read_u8().await?;
-    Ok(mode_byte == b'R')
+    let time = stream.read_u64().await?;
+    Ok((mode_byte == b'R', time))
 }
 
 pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
