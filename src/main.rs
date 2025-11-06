@@ -1,5 +1,5 @@
 use tokio::net::{TcpStream, TcpListener};
-use rustyperf::{handle_connection, make_connection};
+use rustyperf::{handle_connection, make_connection, send_mode, receive_mode};
 use clap::Parser;
 
 
@@ -38,13 +38,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if arg.client {
         // 1. 连接到服务器
-        let stream = TcpStream::connect(format!("{}:{}", arg.address, arg.port)).await?;
+        let mut stream = TcpStream::connect(format!("{}:{}", arg.address, arg.port)).await?;
         if arg.reverse {
-            // let reverse_stream = TcpListener::bind(format!("0.0.0.0:{}", arg.port)).await?;
-            
+            // 反向模式：客户端接收，服务器发送
+            println!("已连接到服务器 (反向模式)");
+            send_mode(&mut stream, true).await?;
+            handle_connection(stream).await?;
+        } else {
+            // 正常模式：客户端发送，服务器接收
+            println!("已连接到服务器 (正常模式)");
+            send_mode(&mut stream, false).await?;
+            make_connection(stream, arg.time).await?;
         }
-        println!("已连接到服务器");
-        make_connection(stream, arg.time).await.unwrap();
     }
 
     else if arg.server {
@@ -53,10 +58,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("服务器正在监听{}端口", arg.port);
         loop {
             // 2. 接受新的连接
-            let (socket, _) = listener.accept().await?; 
+            let (mut socket, addr) = listener.accept().await?; 
+            println!("新连接来自: {}", addr);
             // 3. 为每个连接生成一个新任务，防止阻塞主循环
             tokio::spawn(async move {
-                handle_connection(socket).await.unwrap();
+                match receive_mode(&mut socket).await {
+                    Ok(is_reverse) => {
+                        if is_reverse {
+                            // 反向模式：服务器发送
+                            println!("[{}] 反向模式，服务器开始发送数据", addr);
+                            if let Err(e) = make_connection(socket, arg.time).await {
+                                eprintln!("[{}] 发送错误: {}", addr, e);
+                            }
+                        } else {
+                            // 正常模式：服务器接收
+                            println!("[{}] 正常模式，服务器开始接收数据", addr);
+                            if let Err(e) = handle_connection(socket).await {
+                                eprintln!("[{}] 接收错误: {}", addr, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[{}] 读取模式信息失败: {}", addr, e);
+                    }
+                }
             });
         }
     }

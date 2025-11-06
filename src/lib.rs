@@ -2,6 +2,18 @@ use tokio::net::TcpStream;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::time::{Instant, Duration};
 
+pub async fn send_mode(stream: &mut TcpStream, is_reverse: bool) -> io::Result<()> {
+    let mode_byte = if is_reverse { b'R' } else { b'N' };
+    stream.write_u8(mode_byte).await?;
+    stream.flush().await?;
+    Ok(())
+}
+
+pub async fn receive_mode(stream: &mut TcpStream) -> io::Result<bool> {
+    let mode_byte = stream.read_u8().await?;
+    Ok(mode_byte == b'R')
+}
+
 pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
     let mut buffer = [0; 1024*64]; //64KiB 
     let mut total_bytes_received: u64 = 0;
@@ -16,15 +28,15 @@ pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
         // 从接口读取数据
         let n = match socket.read(&mut buffer).await {
             Ok(n) if n == 0 => {
-                println!("接收结束，连接关闭");
                 // 显示最终统计
                 let total_time = start_time.elapsed();
                 if total_time.as_secs() > 0 {
                     let avg_bps = total_bytes_received as f64 * 8.0 / total_time.as_secs_f64();
                     println!("总接收: {:.2} MB, 平均速率: {}", 
-                        total_bytes_received/1_048_576,
-                        format_speed(avg_bps));
+                    total_bytes_received/1_048_576,
+                    format_speed(avg_bps));
                 }
+                println!("接收结束，连接关闭");
                 return Ok(total_bytes_received);
             },
             Ok(n) => n,
