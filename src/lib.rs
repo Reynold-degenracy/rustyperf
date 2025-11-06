@@ -8,6 +8,7 @@ pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
     let mut interval_bytes: u64 = 0;
     
     // 用于计算速率的时间点
+    let start_time = Instant::now();
     let mut last_report_time = Instant::now();
     let report_interval = Duration::from_secs(1); // 每秒显示一次速率
     
@@ -17,9 +18,9 @@ pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
             Ok(n) if n == 0 => {
                 println!("接收结束，连接关闭");
                 // 显示最终统计
-                let total_time = last_report_time.elapsed();
+                let total_time = start_time.elapsed();
                 if total_time.as_secs() > 0 {
-                    let avg_bps = total_bytes_received as f64 / total_time.as_secs_f64();
+                    let avg_bps = total_bytes_received as f64 * 8.0 / total_time.as_secs_f64();
                     println!("总接收: {:.2} MB, 平均速率: {}", 
                         total_bytes_received/1_048_576,
                         format_speed(avg_bps));
