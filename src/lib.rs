@@ -35,7 +35,7 @@ pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
                 if total_time.as_secs() > 0 {
                     let avg_bps = total_bytes_received as f64 * 8.0 / total_time.as_secs_f64();
                     println!("总接收: {:.2} MB, 平均速率: {}", 
-                    total_bytes_received/1_048_576,
+                    total_bytes_received as f64 / 1_048_576.0,
                     format_speed(avg_bps));
                 }
                 println!("接收结束，连接关闭");
@@ -55,14 +55,13 @@ pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
         // 检查是否到达报告间隔
         let elapsed = last_report_time.elapsed();
         if elapsed >= report_interval {
-            // 计算当前速率 (字节/秒)
+            // 计算当前速率 (比特/秒)
             let speed_bps = interval_bytes as f64 * 8.0 / elapsed.as_secs_f64();
             
             // 格式化显示
-            let speed_str = format_speed(speed_bps);
             println!(
                 "接收速率: {} | 总接收: {:.2} MB",
-                speed_str,
+                format_speed(speed_bps),
                 total_bytes_received as f64 / 1_048_576.0
             );
             
@@ -102,8 +101,8 @@ pub async fn make_connection(mut stream: TcpStream, time: u64) -> io::Result<u64
 
     println!("测试完成！");
     println!("持续时间: {:.2?}", elapsed);
-    println!("总共发送: {:.2} MB", total_bytes_sent as f64 / 1_000_000.0);
-    println!("吞吐率: {} ", format_speed(throughput_bps));
+    println!("总共发送: {:.2} MB", total_bytes_sent as f64 / 1_048_576.0);
+    println!("平均速率: {} ", format_speed(throughput_bps));
     Ok(0)
 }
 
