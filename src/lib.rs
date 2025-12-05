@@ -1,22 +1,65 @@
-use tokio::net::TcpStream;
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpStream, UdpSocket};
+use tokio::io::{self, AsyncWriteExt, AsyncReadExt};
 use tokio::time::{Instant, Duration};
+use clap::Parser;
+use serde::{Deserialize, Serialize};
 
-pub async fn send_mode(stream: &mut TcpStream, is_reverse: bool, time: u64) -> io::Result<()> {
-    let mode_byte = if is_reverse { b'R' } else { b'N' };
-    stream.write_u8(mode_byte).await?;
-    stream.write_u64(time).await?;
+#[derive(Parser, Debug, Serialize, Deserialize, PartialEq)]
+#[command(
+    name = "RustyPerf",
+    author = "Shinonome",
+    version = "v1.0.2",
+    about = "Application short description."
+)]
+pub struct Config {
+
+    #[arg(short='p', long="port", default_value_t = 2077)]
+    pub port: u16,
+
+    #[arg(short='t', long="time", default_value_t = 10)]
+    pub time: u64,
+
+    #[arg(short='c', long="client", default_value_t = false)]
+    pub client: bool,
+
+    #[arg(short='s', long="server", default_value_t = true)]
+    pub server: bool,
+
+    #[arg(short='a', long="address", default_value_t = String::from("127.0.0.1"))]
+    pub address: String,
+
+    #[arg(short='r', long="reverse", default_value_t = false)]
+    pub reverse: bool,
+
+    #[arg(short='u', long="udp", default_value_t = false)]
+    pub udp: bool,
+
+    #[arg(short='b', long="bandwidth", default_value_t = 1_u64<<20)]
+    pub bandwidth: u64, //in bps
+}
+
+pub async fn send_arg(stream: &mut TcpStream, config: &Config) -> io::Result<()> {
+    // serialize 会自动处理 String 的长度前缀和数据的二进制转换
+    let data = bincode::serialize(config)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let len = data.len() as u64;
+    stream.write_u64(len).await?;
+    stream.write_all(&data).await?;
     stream.flush().await?;
-    Ok(())
+    Ok(()) 
 }
 
-pub async fn receive_mode(stream: &mut TcpStream) -> io::Result<(bool, u64)> {
-    let mode_byte = stream.read_u8().await?;
-    let time = stream.read_u64().await?;
-    Ok((mode_byte == b'R', time))
+pub async fn receive_arg(stream: &mut TcpStream) -> io::Result<Config> {
+    let len = stream.read_u64().await?;
+    let mut data = vec![0u8; len as usize];
+    stream.read_exact(&mut data).await?;
+    // deserialize 会一直读取直到还原出一个完整的 Config 结构体
+    let config: Config = bincode::deserialize(&data)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok(config)
 }
 
-pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
+pub async fn handle_tcp_test(socket:&mut TcpStream, time: u64) -> io::Result<u64> {
     let mut buffer = [0; 1024*64]; //64KiB 
     let mut total_bytes_received: u64 = 0;
     let mut interval_bytes: u64 = 0;
@@ -33,7 +76,7 @@ pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
                 // 显示最终统计
                 let total_time = start_time.elapsed();
                 if total_time.as_secs() > 0 {
-                    let avg_bps = total_bytes_received as f64 * 8.0 / total_time.as_secs_f64();
+                    let avg_bps = total_bytes_received as f64 * 8.0 / time as f64;
                     println!("总接收: {:.2} MB, 平均速率: {}", 
                     total_bytes_received as f64 / 1_048_576.0,
                     format_speed(avg_bps));
@@ -72,7 +115,7 @@ pub async fn handle_connection(mut socket: TcpStream) -> io::Result<u64> {
     }
 }
 
-pub async fn make_connection(mut stream: TcpStream, time: u64) -> io::Result<u64> {
+pub async fn make_tcp_test(stream:&mut TcpStream, time: u64) -> io::Result<u64> {
     let data = [0u8; 1024 * 64]; // 64KiB 的数据块
     let start_time = Instant::now();
     let test_duration: Duration = Duration::from_secs(time as u64);
@@ -95,6 +138,10 @@ pub async fn make_connection(mut stream: TcpStream, time: u64) -> io::Result<u64
         }
     }
 
+    //结束发送，关闭连接
+    stream.flush().await?;
+    stream.shutdown().await?;
+
     // 3. 计算并打印结果
     let elapsed = start_time.elapsed();
     let throughput_bps = (total_bytes_sent as f64 * 8.0) / (elapsed.as_secs_f64());
@@ -105,6 +152,15 @@ pub async fn make_connection(mut stream: TcpStream, time: u64) -> io::Result<u64
     println!("平均速率: {} ", format_speed(throughput_bps));
     Ok(0)
 }
+
+pub async fn make_udp_test(mut udp_socket: UdpSocket, time: u64, speed: u64) -> io::Result<u64> {
+    Ok(0)
+}
+
+pub async fn handle_udp_test(mut udp_socket: UdpSocket, time: u64, speed: u64) -> io::Result<u64> {
+    Ok(0)
+}
+
 
 fn format_speed(bits_per_sec: f64) -> String {
     if bits_per_sec >= 1e9 as f64 {
