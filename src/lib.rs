@@ -1,6 +1,6 @@
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::io::{self, AsyncWriteExt, AsyncReadExt};
-use tokio::time::{Instant, Duration};
+use tokio::time::{Instant, Duration, interval};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -60,7 +60,8 @@ pub async fn receive_arg(stream: &mut TcpStream) -> io::Result<Config> {
 }
 
 pub async fn handle_tcp_test(socket:&mut TcpStream, time: u64) -> io::Result<u64> {
-    let mut buffer = [0; 1024*64]; //64KiB 
+    const BUFFER_SIZE: usize = 1024 * 64; // 64KiB 缓冲区
+    let mut buffer = [0; BUFFER_SIZE]; 
     let mut total_bytes_received: u64 = 0;
     let mut interval_bytes: u64 = 0;
     
@@ -77,7 +78,8 @@ pub async fn handle_tcp_test(socket:&mut TcpStream, time: u64) -> io::Result<u64
                 let total_time = start_time.elapsed();
                 if total_time.as_secs() > 0 {
                     let avg_bps = total_bytes_received as f64 * 8.0 / time as f64;
-                    println!("总接收: {:.2} MB, 平均速率: {}", 
+                    println!("测试完成！");
+                    println!("总接收: {:.2} MB | 平均速率: {}", 
                     total_bytes_received as f64 / 1_048_576.0,
                     format_speed(avg_bps));
                 }
@@ -130,8 +132,11 @@ pub async fn make_tcp_test(stream:&mut TcpStream, time: u64) -> io::Result<u64> 
         bytes_since_last_report += bytes_sent;
         if last_report_time.elapsed() >= Duration::from_secs(1) {
             let throughput_bps = (bytes_since_last_report) as f64 * 8.0;
-            println!("发送速率： {}", format_speed(throughput_bps));
-
+            println!(
+                "发送速率：{} | 总发送：{} MB",
+                format_speed(throughput_bps),
+                total_bytes_sent as f64 / 1_048_576.0
+            );
             // 重置计数
             bytes_since_last_report = 0;
             last_report_time = Instant::now();
@@ -153,14 +158,141 @@ pub async fn make_tcp_test(stream:&mut TcpStream, time: u64) -> io::Result<u64> 
     Ok(0)
 }
 
-pub async fn make_udp_test(mut udp_socket: UdpSocket, time: u64, speed: u64) -> io::Result<u64> {
+pub async fn make_udp_test(udp_socket: & UdpSocket, time: u64, speed: u64) -> io::Result<u64> {
+    const PACKET_SIZE: usize = 1400;
+
+    let target_bytes_per_sec = speed as f64 / 8.0;
+    let packets_per_sec = target_bytes_per_sec / PACKET_SIZE as f64;
+    let interval_micros = (1_000_000.0 / packets_per_sec) as u64;
+
+    let mut interval_timer = interval(Duration::from_micros(interval_micros));
+    let mut report_timer = Instant::now();
+    let start_time = Instant::now();
+    let end_time = start_time + Duration::from_secs(time);
+
+    let mut seq_num: u64 = 0;
+    let mut total_bytes: u64 = 0;
+
+    while Instant::now() < end_time {
+        interval_timer.tick().await;
+        
+        // 构造数据包：[seq_num(8字节)][timestamp_micros(8字节)][payload]
+        let mut packet = vec![0u8; PACKET_SIZE];
+        packet[0..8].copy_from_slice(&seq_num.to_be_bytes());
+        let timestamp = start_time.elapsed().as_micros() as u64;
+        packet[8..16].copy_from_slice(&timestamp.to_be_bytes());
+        
+        match udp_socket.send(&packet).await {
+            Ok(sent) => {
+                total_bytes += sent as u64;
+                seq_num += 1;
+            }
+            Err(e) => eprintln!("发送错误: {}", e),
+        }
+        if report_timer.elapsed() >= Duration::from_secs(1) {
+            let elapsed = start_time.elapsed().as_secs_f64();
+            let bps = (total_bytes as f64 * 8.0) / elapsed;
+            println!(
+                "{} 发送速率: {} | 总发送: {:.2} MB",
+                elapsed,
+                format_speed(bps),
+                total_bytes as f64 / 1_048_576.0
+            );
+            report_timer = Instant::now();
+        }
+    }
+    
+    let actual_duration = start_time.elapsed();
+    let packets_sent = seq_num;
+    println!("测试完成！");
+    println!("总共发送: {:.2} MB", total_bytes as f64 / 1_048_576.0);
+    println!("持续时间: {:.2?}", actual_duration );
+    println!("共发送 {}个数据包", packets_sent);
     Ok(0)
 }
 
-pub async fn handle_udp_test(mut udp_socket: UdpSocket, time: u64, speed: u64) -> io::Result<u64> {
+pub async fn handle_udp_test(udp_socket:& UdpSocket, time: u64) -> io::Result<u64> {
+    const BUFFER_SIZE: usize = 1024 * 64;
+    let mut buffer = vec![0u8; BUFFER_SIZE];
+
+    let start_time = Instant::now();
+    let end_time = start_time + Duration::from_secs(time + 2); // 额外等待时间
+
+    let mut last_seq: Option<u64> = None;
+    let mut packets_received: u64 = 0;
+    let mut packets_lost: u64 = 0;
+    let mut total_bytes: u64 = 0;
+    
+    let mut last_transit: Option<f64> = None;
+    let mut jitter_sum: f64 = 0.0;
+    let mut jitter_count: u64 = 0;
+
+    loop {
+        let timeout = end_time.saturating_duration_since(Instant::now());
+        if timeout.is_zero() {
+            break;
+        }
+        
+        match tokio::time::timeout(timeout, udp_socket.recv(&mut buffer)).await {
+            Ok(Ok(len)) => {
+                if len >= 16 {
+                    total_bytes += len as u64;
+                    
+                    // 解析序列号和时间戳
+                    let seq = u64::from_be_bytes(buffer[0..8].try_into().unwrap());
+                    let send_time = u64::from_be_bytes(buffer[8..16].try_into().unwrap());
+                    let recv_time = start_time.elapsed().as_micros() as u64;
+                    
+                    // 检测丢包
+                    if let Some(last) = last_seq {
+                        let expected_seq = last + 1;
+                        if seq > expected_seq {
+                            packets_lost += seq - expected_seq;
+                        }
+                    }
+                    last_seq = Some(seq);
+                    packets_received += 1;
+                    
+                    // 计算抖动 (RFC 1889)
+                    let transit = (recv_time - send_time) as f64 / 1_000.0; // 转换为毫秒
+                    if let Some(last_t) = last_transit {
+                        let jitter = (transit - last_t).abs();
+                        jitter_sum += jitter;
+                        jitter_count += 1;
+                    }
+                    last_transit = Some(transit);
+                }
+            }
+            Ok(Err(e)) => eprintln!("接收错误: {}", e),
+            Err(_) => break, // 超时
+        }
+    }
+    
+    let actual_duration = start_time.elapsed();
+    let total_packets = packets_received + packets_lost;
+    let loss_rate = if total_packets > 0 {
+        packets_lost as f64 / total_packets as f64 * 100.0
+    } else {
+        0.0
+    };
+    
+    let bandwidth_mbps = (total_bytes as f64 * 8.0) / actual_duration.as_secs_f64() / 1_000_000.0;
+    let avg_jitter_ms = if jitter_count > 0 {
+        jitter_sum / jitter_count as f64
+    } else {
+        0.0
+    };
+
+    println!("测试完成！");
+    println!("总共接收: {:.2} MB", total_bytes as f64 / 1_048_576.0);
+    println!("持续时间: {:.2?}", actual_duration);
+    println!("接收数据包: {}", packets_received);
+    println!("丢失数据包: {} (丢包率: {:.2}%)", packets_lost, loss_rate);
+    println!("平均带宽: {:.2} Mbps", bandwidth_mbps);
+    println!("平均抖动: {:.2} ms", avg_jitter_ms);
+
     Ok(0)
 }
-
 
 fn format_speed(bits_per_sec: f64) -> String {
     if bits_per_sec >= 1e9 as f64 {

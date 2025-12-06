@@ -12,18 +12,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if arg.client {
         // 1. 连接到服务器
-        let mut udp_socket = UdpSocket::bind(format!("0.0.0.0:{}", arg.port)).await?;
+        let udp_socket = UdpSocket::bind(format!("0.0.0.0:{}", arg.port)).await?;
         udp_socket.connect(format!("{}:{}", arg.address, arg.port)).await?; 
         let mut stream = TcpStream::connect(format!("{}:{}", arg.address, arg.port)).await?;
         send_arg(&mut stream, &arg).await?;
         match (arg.reverse, arg.udp) {
             (true, true) => {
                 println!("已连接到服务器 (udp反向模式)");
-                handle_udp_test(udp_socket, arg.time, arg.bandwidth).await?;
+                handle_udp_test(&udp_socket, arg.time).await?;
             }
             (false, true) => {
                 println!("已连接到服务器 (udp反向模式)");
-                make_udp_test(udp_socket, arg.time, arg.bandwidth).await?;
+                make_udp_test(&udp_socket, arg.time, arg.bandwidth).await?;
             }
             (true, false) => {
                 // 反向模式：客户端接收，服务器发送
@@ -57,27 +57,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                 };
-                match (client_arg.udp, client_arg.reverse, client_arg.time) {
-                    (true, true, time) => {
+                match (client_arg.udp, client_arg.reverse) {
+                    (true, true) => {
                         // 反向模式：服务器发送
-                        
+                        println!("[{}] udp反向模式，服务器开始发送数据", addr);
+                        let udp_socket = match UdpSocket::bind(format!("0.0.0.0:{}", arg.port)).await {
+                            Ok(socket) => socket,
+                            Err(e) => {
+                                eprintln!("[{}] 绑定UDP端口错误: {}", addr, e);
+                                return;
+                            }
+                        };
+                        if let Err(e) = udp_socket.connect(addr).await {
+                            eprintln!("[{}] 连接UDP目标错误: {}", addr, e);
+                            return;
+                        }
+                        if let Err(e) = make_udp_test(&udp_socket, client_arg.time, client_arg.bandwidth).await {
+                            eprintln!("[{}] UDP测试失败: {}", addr, e);
+                            return;
+                        }
                     }
-                    (true, false, time) => {
+                    (true, false) => {
                         // 正向模式：服务器接收
-                        
+                        println!("[{}] udp正向模式，服务器开始接收数据", addr);
+                        let udp_socket = match UdpSocket::bind(format!("0.0.0.0:{}", arg.port)).await {
+                            Ok(socket) => socket,
+                            Err(e) => {
+                                eprintln!("[{}] 绑定UDP端口错误: {}", addr, e);
+                                return;
+                            }
+                        };
+                        if let Err(e) = udp_socket.connect(addr).await {
+                            eprintln!("[{}] 连接UDP目标错误: {}", addr, e);
+                            return;
+                        }
+                        if let Err(e) = handle_udp_test(&udp_socket, client_arg.time).await {
+                            eprintln!("[{}] UDP测试失败: {}", addr, e);
+                            return;
+                        }
+                        return;
                     }
-                    (false, true, time) => {
+                    (false, true) => {
                         // 反向模式：服务器发送
-                        println!("[{}] 反向模式，服务器开始发送数据", addr);
-                        if let Err(e) = make_tcp_test(&mut socket, time).await {
+                        println!("[{}] tcp反向模式，服务器开始发送数据", addr);
+                        if let Err(e) = make_tcp_test(&mut socket, client_arg.time).await {
                             eprintln!("[{}] 发送错误: {}", addr, e);
+                            return;
                         }
                     }    
-                    (false, false, time) => {
+                    (false, false) => {
                         // 正常模式：服务器接收
-                        println!("[{}] 正常模式，服务器开始接收数据", addr);
-                        if let Err(e) = handle_tcp_test(&mut socket, time).await {
+                        println!("[{}] tcp正常模式，服务器开始接收数据", addr);
+                        if let Err(e) = handle_tcp_test(&mut socket, client_arg.time).await {
                             eprintln!("[{}] 接收错误: {}", addr, e);
+                            return;
                         }
                     }
                 }
