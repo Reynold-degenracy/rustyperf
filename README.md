@@ -19,6 +19,13 @@ cargo run --
 cargo run -- -c -a 127.0.0.1 -t 10 #向本机服务器进行10秒钟正向测试
 cargo run -- -c -a 192.168.1.1 -t 60 -r #向192.168.1.1进行60秒反向测试
 ```
+在传入 -u 参数时，以UDP模式运行，在该模式下使用-b指定测试速度
+```bash
+# cargo run -- -c -u [-b --bandwidth] [-a --address] [-t --time] [-r --reverse] 
+cargo run -- -c -a 127.0.0.1 -t 10 -u -b 1024 #向本机服务器进行10秒钟正向udp测试，速度是1024bit/s，即1Kb/s
+cargo run -- -c -a 127.0.0.1 -t 60 -u -b 1048576 -r #向本机服务器进行10秒钟反向udp测试，速度是1048576bit/s，即1Mb/s
+```
+
 </details>
 
 
@@ -37,11 +44,16 @@ If no parameters are passed, the program will run in server mode by default.
 #Equivalent to cargo run -- -s
 cargo run -- 
 ```
-When the -c parameter is passed, the program runs in client mode.
+When passing the -c parameter, the program runs in client mode.
 ```bash
 # cargo run -- -c [-a --address] [-t --time] [-r --reverse]
-cargo run -- -c -a 127.0.0.1 -t 10 #Perform a 10-second positive test on the local server.
+cargo run -- -c -a 127.0.0.1 -t 10 #Perform a 10-second forward test on the local server.
 cargo run -- -c -a 192.168.1.1 -t 60 -r #Perform a 60-second reverse test on 192.168.1.1.
 ```
+When -u parameter is passed, the program runs udp test
+```bash
+# cargo run -- -c -u [-b --bandwidth] [-a --address] [-t --time] [-r --reverse] 
+cargo run -- -c -a 127.0.0.1 -t 10 -u -b 1024 #Perform a 10-second forward udp test on the local server at the speed of 1024bit/s, that is 1Kb/s.
+cargo run -- -c -a 127.0.0.1 -t 60 -u -b 1048576 -r #Perform a 60-second reverse udp test on the local server at the speed of 1048576bit/s, that is 1Mb/s.
 
 </details>
