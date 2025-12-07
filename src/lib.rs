@@ -294,6 +294,21 @@ pub async fn handle_udp_test(udp_socket:& UdpSocket, time: u64) -> io::Result<u6
     Ok(0)
 }
 
+pub async fn swap_udp_port(udp_socket: & UdpSocket, tcp_stream: &mut TcpStream) -> io::Result<u16> {
+    // 获取当前UDP端口
+    let local_addr = udp_socket.local_addr()?;
+    let udp_port = local_addr.port();
+
+    // 发送UDP端口到服务器
+    tcp_stream.write_u16(udp_port).await?;
+    tcp_stream.flush().await?;
+
+    // 接收服务器确认消息
+    let n = tcp_stream.read_u16().await?;
+
+    Ok(n)
+}
+
 fn format_speed(bits_per_sec: f64) -> String {
     if bits_per_sec >= 1e9 as f64 {
         format!("{:.2} Gbps", bits_per_sec / 1e9 as f64)

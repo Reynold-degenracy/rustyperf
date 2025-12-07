@@ -1,5 +1,5 @@
 use tokio::net::{TcpStream, TcpListener, UdpSocket};
-use rustyperf::{handle_tcp_test, make_tcp_test, make_udp_test, handle_udp_test, send_arg, receive_arg, Config};
+use rustyperf::{handle_tcp_test, make_tcp_test, make_udp_test, handle_udp_test, send_arg, receive_arg, swap_udp_port,Config};
 use clap::Parser;
 
 
@@ -11,18 +11,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arg = Config::parse();
 
     if arg.client {
-        // 1. 连接到服务器
-        let udp_socket = UdpSocket::bind(format!("0.0.0.0:{}", arg.port)).await?;
-        udp_socket.connect(format!("{}:{}", arg.address, arg.port)).await?; 
+        // 1. 连接到服务器 
         let mut stream = TcpStream::connect(format!("{}:{}", arg.address, arg.port)).await?;
         send_arg(&mut stream, &arg).await?;
         match (arg.reverse, arg.udp) {
             (true, true) => {
                 println!("已连接到服务器 (udp反向模式)");
+                let udp_socket = UdpSocket::bind("0.0.0.0:0").await?;
+                let server_udp_port = swap_udp_port(&udp_socket, &mut stream).await?;
+                udp_socket.connect(format!("{}:{}", arg.address, server_udp_port)).await?;
                 handle_udp_test(&udp_socket, arg.time).await?;
             }
             (false, true) => {
-                println!("已连接到服务器 (udp反向模式)");
+                println!("已连接到服务器 (udp正向模式)");
+                let udp_socket = UdpSocket::bind("0.0.0.0:0").await?;
+                let server_udp_port = swap_udp_port(&udp_socket, &mut stream).await?;
+                udp_socket.connect(format!("{}:{}", arg.address, server_udp_port)).await?;
                 make_udp_test(&udp_socket, arg.time, arg.bandwidth).await?;
             }
             (true, false) => {
@@ -61,14 +65,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     (true, true) => {
                         // 反向模式：服务器发送
                         println!("[{}] udp反向模式，服务器开始发送数据", addr);
-                        let udp_socket = match UdpSocket::bind(format!("0.0.0.0:{}", arg.port)).await {
+                        let udp_socket = match UdpSocket::bind("0.0.0.0:0").await {
                             Ok(socket) => socket,
                             Err(e) => {
                                 eprintln!("[{}] 绑定UDP端口错误: {}", addr, e);
                                 return;
                             }
                         };
-                        if let Err(e) = udp_socket.connect(addr).await {
+                        let client_udp_port = match swap_udp_port(&udp_socket, &mut socket).await {
+                            Ok(port) => {
+                                println!("udp端口为{}", port);
+                                port
+                            },
+                            Err(e) =>{
+                                eprintln!("[{}] 交换UDP端口错误: {}", addr, e);
+                                return;
+                            }
+                        };
+                        if let Err(e) = udp_socket.connect(format!("{}:{}", addr.ip(), client_udp_port)).await {
                             eprintln!("[{}] 连接UDP目标错误: {}", addr, e);
                             return;
                         }
@@ -80,14 +94,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     (true, false) => {
                         // 正向模式：服务器接收
                         println!("[{}] udp正向模式，服务器开始接收数据", addr);
-                        let udp_socket = match UdpSocket::bind(format!("0.0.0.0:{}", arg.port)).await {
+                        let udp_socket = match UdpSocket::bind("0.0.0.0:0").await {
                             Ok(socket) => socket,
                             Err(e) => {
                                 eprintln!("[{}] 绑定UDP端口错误: {}", addr, e);
                                 return;
                             }
                         };
-                        if let Err(e) = udp_socket.connect(addr).await {
+                        let client_udp_port = match swap_udp_port(&udp_socket, &mut socket).await {
+                            Ok(port) => {
+                                println!("udp端口为{}", port);
+                                port
+                            },
+                            Err(e) =>{
+                                eprintln!("[{}] 交换UDP端口错误: {}", addr, e);
+                                return;
+                            }
+                        };
+                        if let Err(e) = udp_socket.connect(format!("{}:{}", addr.ip(), client_udp_port)).await {
                             eprintln!("[{}] 连接UDP目标错误: {}", addr, e);
                             return;
                         }
